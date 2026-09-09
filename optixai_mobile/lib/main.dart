@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
+import 'package:uuid/uuid.dart';
 
 import 'database_helper.dart';
 import 'tflite_service.dart';
+import 'sync_service.dart';
 
-// ---------------------------------------------------------------------------
-// Design System Colors & Constants
-// ---------------------------------------------------------------------------
 const Color bruteGray = Color(0xFFE5E7EB);
 const Color bruteBlack = Color(0xFF111827);
 const Color bruteCyan = Color(0xFF00F0FF);
@@ -34,6 +32,7 @@ Future<void> main() async {
   }
 
   await DatabaseHelper().database;
+  SyncService().initialize(); // Start background sync listener
 
   runApp(const OptixApp());
 }
@@ -48,58 +47,37 @@ class OptixApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         scaffoldBackgroundColor: bruteGray,
-        fontFamily: 'Courier', // Mechanical/Industrial default font
+        fontFamily: 'Courier',
         textTheme: const TextTheme(
           bodyMedium: TextStyle(fontWeight: FontWeight.w700, color: bruteBlack),
           titleLarge: TextStyle(fontWeight: FontWeight.w900, color: bruteBlack, letterSpacing: -0.5),
         ),
       ),
-      home: const ScreeningScreen(),
+      home: const RegistrationScreen(),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Reusable Brute-Neumorphic Widgets
+// Brute UI Components
 // ---------------------------------------------------------------------------
-
 class BruteCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
-  final double? width;
-  final double? height;
   final Color color;
 
-  const BruteCard({
-    super.key,
-    required this.child,
-    this.padding = const EdgeInsets.all(16),
-    this.width,
-    this.height,
-    this.color = bruteGray,
-  });
+  const BruteCard({super.key, required this.child, this.padding = const EdgeInsets.all(16), this.color = bruteGray});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: width,
-      height: height,
       padding: padding,
       decoration: BoxDecoration(
         color: color,
         border: Border.all(color: bruteBlack, width: 3),
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
-          BoxShadow(
-            color: bruteBlack,
-            offset: Offset(5, 5),
-            blurRadius: 0,
-          ),
-          BoxShadow(
-            color: Colors.white,
-            offset: Offset(-2, -2),
-            blurRadius: 0,
-          ),
+          BoxShadow(color: bruteBlack, offset: Offset(5, 5), blurRadius: 0),
         ],
       ),
       child: child,
@@ -111,17 +89,8 @@ class BruteButton extends StatefulWidget {
   final String label;
   final VoidCallback onPressed;
   final Color backgroundColor;
-  final double height;
-  final double? width;
 
-  const BruteButton({
-    super.key,
-    required this.label,
-    required this.onPressed,
-    this.backgroundColor = bruteCyan,
-    this.height = 60,
-    this.width,
-  });
+  const BruteButton({super.key, required this.label, required this.onPressed, this.backgroundColor = bruteCyan});
 
   @override
   State<BruteButton> createState() => _BruteButtonState();
@@ -129,20 +98,9 @@ class BruteButton extends StatefulWidget {
 
 class _BruteButtonState extends State<BruteButton> {
   bool _isPressed = false;
-
-  void _handleTapDown(TapDownDetails details) {
-    HapticFeedback.heavyImpact();
-    setState(() => _isPressed = true);
-  }
-
-  void _handleTapUp(TapUpDetails details) {
-    setState(() => _isPressed = false);
-    widget.onPressed();
-  }
-
-  void _handleTapCancel() {
-    setState(() => _isPressed = false);
-  }
+  void _handleTapDown(_) => setState(() => _isPressed = true);
+  void _handleTapUp(_) { setState(() => _isPressed = false); widget.onPressed(); }
+  void _handleTapCancel() => setState(() => _isPressed = false);
 
   @override
   Widget build(BuildContext context) {
@@ -152,211 +110,106 @@ class _BruteButtonState extends State<BruteButton> {
       onTapCancel: _handleTapCancel,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 50),
-        width: widget.width,
-        height: widget.height,
-        transform: Matrix4.translationValues(
-          _isPressed ? 4.0 : 0.0,
-          _isPressed ? 4.0 : 0.0,
-          0.0,
-        ),
+        height: 60,
+        transform: Matrix4.translationValues(_isPressed ? 4.0 : 0.0, _isPressed ? 4.0 : 0.0, 0.0),
         decoration: BoxDecoration(
           color: widget.backgroundColor,
           border: Border.all(color: bruteBlack, width: 3),
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
-            BoxShadow(
-              color: bruteBlack,
-              offset: _isPressed ? const Offset(1, 1) : const Offset(5, 5),
-              blurRadius: 0,
-            ),
+            BoxShadow(color: bruteBlack, offset: _isPressed ? const Offset(1, 1) : const Offset(5, 5), blurRadius: 0),
           ],
         ),
         child: Center(
-          child: Text(
-            widget.label.toUpperCase(),
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              color: bruteBlack,
-              letterSpacing: 1.2,
+          child: Text(widget.label.toUpperCase(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: bruteBlack)),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1. Patient Registration
+// ---------------------------------------------------------------------------
+class RegistrationScreen extends StatefulWidget {
+  const RegistrationScreen({super.key});
+  @override
+  State<RegistrationScreen> createState() => _RegistrationScreenState();
+}
+
+class _RegistrationScreenState extends State<RegistrationScreen> {
+  final _nameCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
+  final _genderCtrl = TextEditingController();
+  final _diabetesCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+
+  void _startScreening() {
+    final patientId = const Uuid().v4();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DualEyeScreeningScreen(
+          patientData: {
+            'patient_id': patientId,
+            'patient_name': _nameCtrl.text.isEmpty ? 'Unknown' : _nameCtrl.text,
+            'age': int.tryParse(_ageCtrl.text) ?? 0,
+            'gender': _genderCtrl.text,
+            'diabetes_details': _diabetesCtrl.text,
+            'phone': _phoneCtrl.text,
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('PATIENT REGISTRATION', style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: bruteGray, elevation: 0, foregroundColor: bruteBlack),
+      body: ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          BruteCard(
+            child: Column(
+              children: [
+                TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Patient Name', border: OutlineInputBorder())),
+                const SizedBox(height: 16),
+                TextField(controller: _ageCtrl, decoration: const InputDecoration(labelText: 'Age', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+                const SizedBox(height: 16),
+                TextField(controller: _genderCtrl, decoration: const InputDecoration(labelText: 'Gender', border: OutlineInputBorder())),
+                const SizedBox(height: 16),
+                TextField(controller: _diabetesCtrl, decoration: const InputDecoration(labelText: 'Diabetes Details (e.g. Type 2, 5 yrs)', border: OutlineInputBorder())),
+                const SizedBox(height: 16),
+                TextField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'Phone', border: OutlineInputBorder()), keyboardType: TextInputType.phone),
+              ],
             ),
           ),
-        ),
+          const SizedBox(height: 32),
+          BruteButton(label: 'BEGIN SCREENING', onPressed: _startScreening),
+        ],
       ),
     );
   }
 }
 
-class BruteBadge extends StatelessWidget {
-  final String text;
-  final Color color;
+// ---------------------------------------------------------------------------
+// 2. Dual-Eye Capture & Quality Gate
+// ---------------------------------------------------------------------------
+enum ScreeningState { captureLeft, processingLeft, captureRight, processingRight, finalProcessing }
 
-  const BruteBadge({
-    super.key,
-    required this.text,
-    this.color = bruteCyan,
-  });
-
+class DualEyeScreeningScreen extends StatefulWidget {
+  final Map<String, dynamic> patientData;
+  const DualEyeScreeningScreen({super.key, required this.patientData});
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color,
-        border: Border.all(color: bruteBlack, width: 2),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w900,
-          color: bruteBlack,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
+  State<DualEyeScreeningScreen> createState() => _DualEyeScreeningScreenState();
 }
 
-class QualityChecklistCard extends StatelessWidget {
-  final bool isSuccess;
-  const QualityChecklistCard({super.key, required this.isSuccess});
-
-  @override
-  Widget build(BuildContext context) {
-    if (isSuccess) {
-      return BruteCard(
-        color: bruteGray,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Center(child: BruteBadge(text: 'GOOD IMAGE', color: Colors.greenAccent)),
-            const SizedBox(height: 16),
-            _buildCheckRow('✓ Brightness'),
-            _buildCheckRow('✓ Focus'),
-            _buildCheckRow('✓ Eye detected'),
-            _buildCheckRow('✓ Fundus visible'),
-          ],
-        ),
-      );
-    } else {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: bruteGray,
-          border: Border.all(color: bruteRed, width: 3),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: const [
-            BoxShadow(color: bruteBlack, offset: Offset(5, 5), blurRadius: 0),
-            BoxShadow(color: Colors.white, offset: Offset(-2, -2), blurRadius: 0),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Δ Image quality is low', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: bruteRed)),
-            const SizedBox(height: 12),
-            _buildBulletRow('• Move camera closer'),
-            _buildBulletRow('• Keep eye open'),
-            _buildBulletRow('• Avoid excessive light'),
-            _buildBulletRow('• Hold device steady'),
-          ],
-        ),
-      );
-    }
-  }
-
-  Widget _buildCheckRow(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Text(text, style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w900)),
-    );
-  }
-
-  Widget _buildBulletRow(String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w900, color: bruteBlack)),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Viewfinder Components
-// ---------------------------------------------------------------------------
-
-class RetinalTargetPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = bruteBlack
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-
-    final cyanPaint = Paint()
-      ..color = bruteCyan
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-
-    final center = Offset(size.width / 2, size.height / 2);
-    const radius = 125.0;
-
-    // Draw dashed circle
-    const dashLength = 15.0;
-    const gapLength = 10.0;
-    final circumference = 2 * math.pi * radius;
-    final numDashes = (circumference / (dashLength + gapLength)).floor();
-
-    for (int i = 0; i < numDashes; i++) {
-      final startAngle = (i * (dashLength + gapLength)) / radius;
-      final sweepAngle = dashLength / radius;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle,
-        sweepAngle,
-        false,
-        i % 2 == 0 ? paint : cyanPaint,
-      );
-    }
-
-    // Corner crosshairs
-    const arm = 20.0;
-    // Top-left
-    canvas.drawLine(const Offset(0, 0), const Offset(arm, 0), paint);
-    canvas.drawLine(const Offset(0, 0), const Offset(0, arm), paint);
-    // Top-right
-    canvas.drawLine(Offset(size.width, 0), Offset(size.width - arm, 0), paint);
-    canvas.drawLine(Offset(size.width, 0), Offset(size.width, arm), paint);
-    // Bottom-left
-    canvas.drawLine(Offset(0, size.height), Offset(arm, size.height), paint);
-    canvas.drawLine(Offset(0, size.height), Offset(0, size.height - arm), paint);
-    // Bottom-right
-    canvas.drawLine(Offset(size.width, size.height), Offset(size.width - arm, size.height), paint);
-    canvas.drawLine(Offset(size.width, size.height), Offset(size.width, size.height - arm), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// ---------------------------------------------------------------------------
-// Main Screening Screen
-// ---------------------------------------------------------------------------
-
-class ScreeningScreen extends StatefulWidget {
-  const ScreeningScreen({super.key});
-
-  @override
-  State<ScreeningScreen> createState() => _ScreeningScreenState();
-}
-
-class _ScreeningScreenState extends State<ScreeningScreen> {
-  CameraController? _cameraController;
-  String _currentStatus = 'IDLE';
-  XFile? _capturedImage;
+class _DualEyeScreeningScreenState extends State<DualEyeScreeningScreen> {
+  CameraController? _controller;
+  ScreeningState _state = ScreeningState.captureLeft;
+  String? _leftImagePath;
+  String? _rightImagePath;
 
   @override
   void initState() {
@@ -366,347 +219,233 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
 
   Future<void> _initCamera() async {
     if (cameras.isEmpty) return;
-    _cameraController = CameraController(
-      cameras[0],
-      ResolutionPreset.high,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
-    );
-    await _cameraController!.initialize();
+    _controller = CameraController(cameras[0], ResolutionPreset.high, enableAudio: false);
+    await _controller!.initialize();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _captureAndCheckQuality() async {
+    if (_controller == null || !_controller!.value.isInitialized) return;
+
+    try {
+      if (_state == ScreeningState.captureLeft) {
+        setState(() => _state = ScreeningState.processingLeft);
+      } else {
+        setState(() => _state = ScreeningState.processingRight);
+      }
+
+      final file = await _controller!.takePicture();
+      
+      // Local Quality Gate
+      final qualityError = await TFLiteService().assessQuality(file.path);
+      if (!mounted) return;
+
+      if (qualityError != null) {
+        // Quality Failed
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('IMAGE REJECTED: $qualityError. Please retake.'), backgroundColor: bruteRed));
+        setState(() {
+          _state = _state == ScreeningState.processingLeft ? ScreeningState.captureLeft : ScreeningState.captureRight;
+        });
+        return;
+      }
+
+      // Quality Passed
+      if (_state == ScreeningState.processingLeft) {
+        _leftImagePath = file.path;
+        setState(() => _state = ScreeningState.captureRight);
+      } else {
+        _rightImagePath = file.path;
+        setState(() => _state = ScreeningState.finalProcessing);
+        _runEdgeInference();
+      }
+    } catch (e) {
+      debugPrint('Error: $e');
+    }
+  }
+
+  Future<void> _runEdgeInference() async {
+    try {
+      final leftResult = await TFLiteService().gradeRetina(_leftImagePath!);
+      final rightResult = await TFLiteService().gradeRetina(_rightImagePath!);
+
+      bool referable = leftResult.requiresReferral || rightResult.requiresReferral;
+
+      // Save to SQLite Queue
+      final record = Map<String, dynamic>.from(widget.patientData);
+      record['left_eye_path'] = _leftImagePath;
+      record['right_eye_path'] = _rightImagePath;
+      record['left_dr_grade'] = leftResult.grade;
+      record['right_dr_grade'] = rightResult.grade;
+      record['requires_referral'] = referable ? 1 : 0;
+
+      await DatabaseHelper().insertRecord(record);
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ResultDashboard(
+            leftResult: leftResult,
+            rightResult: rightResult,
+            patientName: widget.patientData['patient_name'],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Inference Error: $e');
+    }
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
+    _controller?.dispose();
     super.dispose();
-  }
-
-  Future<void> _captureAndAnalyze() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
-    if (_currentStatus != 'IDLE') return;
-
-    setState(() => _currentStatus = 'CAPTURING');
-
-    try {
-      _capturedImage = await _cameraController!.takePicture();
-      
-      // Simulate Quality Gate
-      bool passed = math.Random().nextBool(); 
-      
-      if (passed) {
-        if (mounted) setState(() => _currentStatus = 'QUALITY_PASSED');
-        await Future.delayed(const Duration(seconds: 1)); // 1-second delay per requirements
-        
-        if (mounted) setState(() => _currentStatus = 'ANALYZING');
-        final result = await TFLiteService().gradeRetina(_capturedImage!.path);
-        
-        if (mounted) {
-          setState(() => _currentStatus = 'IDLE');
-          _showTriageModal(result, _capturedImage!.path);
-        }
-      } else {
-        if (mounted) setState(() => _currentStatus = 'QUALITY_FAILED');
-        // Do not analyze. Wait for user to tap RETAKE.
-      }
-    } catch (e) {
-      debugPrint("Analysis Error: \$e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error analyzing image: \$e')),
-        );
-        setState(() => _currentStatus = 'IDLE');
-      }
-    }
-  }
-
-  void _retake() {
-    setState(() {
-      _capturedImage = null;
-      _currentStatus = 'IDLE';
-    });
-  }
-
-  void _showTriageModal(GradeResult result, String imagePath) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      isDismissible: false,
-      enableDrag: false,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => PopScope(
-        canPop: false, // Prevent back button dismissal
-        child: Container(
-          margin: const EdgeInsets.all(16),
-          child: BruteCard(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'DIAGNOSTIC PRINTOUT',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.grey),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                
-                // Oversized digital readout
-                Text(
-                  'LEVEL \${result.grade}',
-                  style: const TextStyle(
-                    fontSize: 48,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -2,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                Text(
-                  result.label.toUpperCase(),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-
-                // Referral Banner
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: result.requiresReferral ? bruteRed : bruteCyan,
-                    border: Border.all(color: bruteBlack, width: 3),
-                  ),
-                  child: Center(
-                    child: Text(
-                      result.triageAction.toUpperCase(),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                        color: bruteBlack,
-                      ),
-                    ),
-                  ),
-                ),
-                
-                const SizedBox(height: 24),
-                
-                // Threshold probs debug view
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: bruteBlack, width: 2),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('TELEMETRY // PROBABILITIES', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10)),
-                      const SizedBox(height: 8),
-                      Text('> P(GRADE>0): \${result.thresholdProbabilities[0].toStringAsFixed(4)}'),
-                      Text('> P(GRADE>1): \${result.thresholdProbabilities[1].toStringAsFixed(4)}'),
-                      Text('> P(GRADE>2): \${result.thresholdProbabilities[2].toStringAsFixed(4)}'),
-                      Text('> P(GRADE>3): \${result.thresholdProbabilities[3].toStringAsFixed(4)}'),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 32),
-
-                // Actions
-                BruteButton(
-                  label: 'STORE RECORD',
-                  backgroundColor: bruteGray,
-                  onPressed: () async {
-                    await DatabaseHelper().insertRecord({
-                      'patient_name': 'Offline Patient',
-                      'image_path': imagePath,
-                      'dr_grade': result.grade,
-                    });
-                    if (!mounted || !ctx.mounted) return;
-                    
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Record stored offline.')),
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-                BruteButton(
-                  label: 'NEW CAPTURE',
-                  backgroundColor: bruteCyan,
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    bool isProcessing = _state == ScreeningState.processingLeft || _state == ScreeningState.processingRight || _state == ScreeningState.finalProcessing;
+    String eyeTarget = (_state == ScreeningState.captureLeft || _state == ScreeningState.processingLeft) ? "LEFT EYE" : "RIGHT EYE";
+
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Top Bar
-              BruteCard(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'OPTIXAI // CORE-v1',
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                    ),
-                    Row(
-                      children: const [
-                        Icon(Icons.battery_charging_full, color: bruteBlack, size: 18),
-                        SizedBox(width: 8),
-                        BruteBadge(text: 'OFFLINE READY', color: bruteCyan),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Viewfinder Frame
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(color: bruteBlack, width: 3),
-                    color: Colors.black,
-                  ),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (_cameraController != null && _cameraController!.value.isInitialized)
-                        ClipRect(
-                          child: OverflowBox(
-                            alignment: Alignment.center,
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              child: SizedBox(
-                                width: _cameraController!.value.previewSize?.height ?? 1,
-                                height: _cameraController!.value.previewSize?.width ?? 1,
-                                child: CameraPreview(_cameraController!),
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        const Center(child: CircularProgressIndicator(color: bruteCyan)),
-                      
-                      // Debossed viewport effect & target overlay
-                      Container(
-                        decoration: const BoxDecoration(
-                          boxShadow: [
-                            BoxShadow(color: Colors.black54, blurRadius: 10),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: CustomPaint(
-                          painter: RetinalTargetPainter(),
-                        ),
-                      ),
-                      
-                      if (_currentStatus == 'QUALITY_PASSED' || _currentStatus == 'QUALITY_FAILED')
-                        Container(
-                          color: Colors.black87,
-                          alignment: Alignment.center,
-                          padding: const EdgeInsets.all(32),
-                          child: QualityChecklistCard(isSuccess: _currentStatus == 'QUALITY_PASSED'),
-                        )
-                      else if (_currentStatus == 'CAPTURING' || _currentStatus == 'ANALYZING')
-                        Container(
-                          color: Colors.black87,
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const CircularProgressIndicator(color: bruteCyan),
-                                const SizedBox(height: 16),
-                                Text(_currentStatus == 'ANALYZING' ? 'ANALYZING RETINA...' : 'CAPTURING...', 
-                                     style: const TextStyle(color: bruteCyan, fontWeight: FontWeight.w900), 
-                                     textAlign: TextAlign.center),
-                              ],
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Telemetry Card
-              if (_currentStatus == 'IDLE')
-                BruteCard(
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: const [
-                          Text('> LENS: 28D ATTACHED', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
-                          Text('> AI GATE: ACTIVE', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: Colors.green)),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      BruteButton(
-                        label: 'ACQUIRE & ANALYZE',
-                        onPressed: _captureAndAnalyze,
-                      ),
-                    ],
-                  ),
-                )
-              else if (_currentStatus == 'QUALITY_FAILED')
-                BruteCard(
-                  child: BruteButton(
-                    label: 'RETAKE',
-                    backgroundColor: bruteRed,
-                    onPressed: _retake,
-                  ),
-                )
-              else
-                BruteCard(
-                  color: _currentStatus == 'ANALYZING' || _currentStatus == 'QUALITY_PASSED'
-                      ? bruteCyan
-                      : const Color(0xFFFFB800),
-                  child: Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      child: Text(
-                        _currentStatus == 'ANALYZING' ? 'STATUS: RUNNING ML INFERENCE...' : 'STATUS: PROCESSING...',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14,
-                          color: bruteBlack,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+      body: Stack(
+        children: [
+          Positioned.fill(child: CameraPreview(_controller!)),
+          // Brute Neomorphic Guide Overlay
+          Positioned.fill(
+            child: CustomPaint(
+              painter: GuideOverlayPainter(),
+            ),
           ),
-        ),
+          Positioned(
+            top: 60,
+            left: 20,
+            right: 20,
+            child: BruteCard(
+              color: Colors.white.withValues(alpha: 0.9),
+              child: Text(
+                'ALIGN PATIENT\'S $eyeTarget',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          if (isProcessing)
+            Positioned.fill(
+              child: Container(color: Colors.black54, child: const Center(child: CircularProgressIndicator(color: bruteCyan))),
+            ),
+          if (!isProcessing)
+            Positioned(
+              bottom: 40,
+              left: 20,
+              right: 20,
+              child: BruteButton(
+                label: 'CAPTURE $eyeTarget',
+                onPressed: _captureAndCheckQuality,
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
-// Extension to allow inset shadows on BoxDecoration
-extension on BoxShadow {
-  // A hacky workaround to simulate inset shadow visually in a regular container isn't directly supported.
-  // Instead, the user specified a pure Brute design which doesn't rely on blur.
-  // We'll leave the basic overlay as is.
+class GuideOverlayPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black54
+      ..style = PaintingStyle.fill;
+    
+    final path = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    final ovalPath = Path()..addOval(Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: 250, height: 250));
+    
+    final result = Path.combine(PathOperation.difference, path, ovalPath);
+    canvas.drawPath(result, paint);
+
+    final borderPaint = Paint()
+      ..color = bruteCyan
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+    canvas.drawOval(Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: 250, height: 250), borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ---------------------------------------------------------------------------
+// 3. Model Output & Result Dashboard
+// ---------------------------------------------------------------------------
+class ResultDashboard extends StatelessWidget {
+  final GradeResult leftResult;
+  final GradeResult rightResult;
+  final String patientName;
+
+  const ResultDashboard({super.key, required this.leftResult, required this.rightResult, required this.patientName});
+
+  @override
+  Widget build(BuildContext context) {
+    bool referable = leftResult.requiresReferral || rightResult.requiresReferral;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('DIAGNOSTIC PRINTOUT', style: TextStyle(fontWeight: FontWeight.w900)), backgroundColor: bruteGray, foregroundColor: bruteBlack, automaticallyImplyLeading: false),
+      body: ListView(
+        padding: const EdgeInsets.all(24),
+        children: [
+          BruteCard(
+            color: referable ? bruteRed : bruteCyan,
+            child: Column(
+              children: [
+                Text(patientName.toUpperCase(), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 8),
+                Text(referable ? 'FLAG: REFERABLE DR (Level 2+)' : 'ROUTINE FOLLOW-UP', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          _buildEyeResult('LEFT EYE', leftResult),
+          const SizedBox(height: 16),
+          _buildEyeResult('RIGHT EYE', rightResult),
+          const SizedBox(height: 32),
+          BruteButton(
+            label: 'SCREEN NEXT PATIENT',
+            backgroundColor: bruteGray,
+            onPressed: () => Navigator.popUntil(context, (route) => route.isFirst),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEyeResult(String eye, GradeResult result) {
+    return BruteCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(eye, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, decoration: TextDecoration.underline)),
+          const SizedBox(height: 8),
+          Text('GRADE: \${result.grade} (\${result.label})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          Text('CONFIDENCE: \${result.confidenceScore.toStringAsFixed(1)}%'),
+          const SizedBox(height: 8),
+          const Text('LESION EVIDENCE:', style: TextStyle(fontWeight: FontWeight.w900)),
+          for (var ev in result.lesionEvidence) Text('- $ev'),
+          const SizedBox(height: 16),
+          // Simulated Grad-CAM Map Area
+          Container(
+            height: 100,
+            decoration: BoxDecoration(
+              border: Border.all(color: bruteBlack, width: 2),
+              gradient: const RadialGradient(colors: [Colors.redAccent, Colors.transparent], radius: 0.8),
+            ),
+            child: const Center(child: Text('GRAD-CAM++ HEATMAP', style: TextStyle(fontWeight: FontWeight.w900))),
+          ),
+        ],
+      ),
+    );
+  }
 }
