@@ -1,0 +1,10 @@
+torch>=2.2.0
+torchvision>=0.17.0
+timm>=0.9.16
+grad-cam>=1.4.8
+roboflow>=1.1.20
+opencv-python>=4.8.0
+onnx>=1.15.0
+onnx-tf>=1.10.0
+tensorflow>=2.15.0
+matplotlib>=3.8.0
