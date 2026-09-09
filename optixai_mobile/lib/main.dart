@@ -434,8 +434,8 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
       isDismissible: false,
       enableDrag: false,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => WillPopScope(
-        onWillPop: () async => false, // Prevent back button dismissal
+      builder: (ctx) => PopScope(
+        canPop: false, // Prevent back button dismissal
         child: Container(
           margin: const EdgeInsets.all(16),
           child: BruteCard(
@@ -520,12 +520,12 @@ class _ScreeningScreenState extends State<ScreeningScreen> {
                       'image_path': imagePath,
                       'dr_grade': result.grade,
                     });
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Record stored offline.')),
-                      );
-                    }
+                    if (!mounted || !ctx.mounted) return;
+                    
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Record stored offline.')),
+                    );
                   },
                 ),
                 const SizedBox(height: 16),
