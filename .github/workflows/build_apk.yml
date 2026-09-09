@@ -33,19 +33,7 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Clean Previous Builds
-        run: |
-          flutter clean
-          flutter pub get
-          cd android && chmod +x gradlew && ./gradlew clean && cd ..
-
-      - name: Build Universal APK
-        run: |
-          flutter build apk --release \
-            --no-shrink \
-            --android-skip-build-dependency-validation
-
-      - name: Build Per-ABI APKs
+      - name: Build Split-ABI APKs
         run: |
           flutter build apk --release --split-per-abi \
             --no-shrink \
