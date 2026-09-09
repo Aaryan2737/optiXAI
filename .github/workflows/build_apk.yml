@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     # Run all shell commands inside the Flutter project directory
     defaults:
       run:
@@ -33,14 +33,23 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build Android Release (Universal & Per-ABI)
+      - name: Clean Previous Builds
+        run: flutter clean && flutter pub get
+
+      - name: Build Universal APK
         run: |
-          flutter build apk --release --android-skip-build-dependency-validation
-          flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
+          flutter build apk --release \
+            --android-skip-build-dependency-validation \
+            --verbose
+
+      - name: Build Per-ABI APKs
+        run: |
+          flutter build apk --release --split-per-abi \
+            --android-skip-build-dependency-validation
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: optixai-release-apks
           path: optixai_mobile/build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn

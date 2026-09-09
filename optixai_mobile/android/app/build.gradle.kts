@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.example.optixai_mobile"
-    compileSdk = flutter.compileSdkVersion
+    // Pin compileSdk explicitly to prevent checkReleaseAarMetadata failures
+    // from plugin AAR metadata mismatches.
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -15,11 +17,10 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.optixai_mobile"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // tflite_flutter and camera_android_camerax require minSdk >= 21.
+        // We use 24 for broader TFLite op support.
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
