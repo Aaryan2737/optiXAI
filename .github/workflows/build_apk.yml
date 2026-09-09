@@ -28,16 +28,19 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true
 
       - name: Install Dependencies
         run: flutter pub get
 
-      - name: Build Android Release
-        run: flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
+      - name: Build Android Release (Universal & Per-ABI)
+        run: |
+          flutter build apk --release --android-skip-build-dependency-validation
+          flutter build apk --release --split-per-abi --android-skip-build-dependency-validation
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: optixai-release-apks
-          # Paths for actions are relative to the repository root
           path: optixai_mobile/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error

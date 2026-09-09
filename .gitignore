@@ -6,3 +6,4 @@ __pycache__/
 optixai_web/node_modules/
 optixai_web/.next/
 optixai_web/.env*
+.idea/

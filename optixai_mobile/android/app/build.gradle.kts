@@ -32,6 +32,15 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        resources {
+            pickFirsts += listOf(
+                "lib/**/libc++_shared.so",
+                "lib/**/libtensorflowlite_c.so"
+            )
+        }
+    }
 }
 
 kotlin {
